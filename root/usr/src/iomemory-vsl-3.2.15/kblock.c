@@ -901,7 +901,11 @@ void kfio_disk_stat_write_update(kfio_disk_t *fgd, uint64_t totalsize, uint64_t 
         cpu = part_stat_lock();
         part_stat_inc(cpu, &gd->part0, ios[1]);
         part_stat_add(cpu, &gd->part0, sectors[1], totalsize >> 9);
+# if KFIOC_HAS_DISK_STATS_NSECS
         part_stat_add(cpu, &gd->part0, nsecs[1],   duration * 1000);
+# else
+        part_stat_add(cpu, &gd->part0, ticks[1],   kfio_div64_64(duration * HZ, 1000000));
+# endif
         part_stat_unlock();
 # endif /* defined(KFIOC_CONFIG_PREEMPT_RT) */
 # else /* KFIOC_PARTITION_STATS */
@@ -909,7 +913,11 @@ void kfio_disk_stat_write_update(kfio_disk_t *fgd, uint64_t totalsize, uint64_t 
 #  if KFIOC_HAS_DISK_STATS_READ_WRITE_ARRAYS
         disk_stat_inc(gd, ios[1]);
         disk_stat_add(gd, sectors[1], totalsize >> 9);
+# if KFIOC_HAS_DISK_STATS_NSECS
         disk_stat_add(gd, nsecs[1], jiffies_to_nsecs(fusion_usectohz(duration)));
+# else
+        disk_stat_add(gd, ticks[1], fusion_usectohz(duration));
+# endif
 #  else /* KFIOC_HAS_DISK_STATS_READ_WRITE_ARRAYS */
         disk_stat_inc(gd, writes);
         disk_stat_add(gd, write_sectors, totalsize >> 9);
@@ -941,14 +949,22 @@ void kfio_disk_stat_read_update(kfio_disk_t *fgd, uint64_t totalsize, uint64_t d
         cpu = part_stat_lock();
         part_stat_inc(cpu, &gd->part0, ios[0]);
         part_stat_add(cpu, &gd->part0, sectors[0], totalsize >> 9);
+# if KFIOC_HAS_DISK_STATS_NSECS
         part_stat_add(cpu, &gd->part0, nsecs[0],   duration * 1000);
+# else
+        part_stat_add(cpu, &gd->part0, ticks[0],   kfio_div64_64(duration * HZ, 1000000));
+# endif
         part_stat_unlock();
 # endif /* KFIO_CONFIG_PREEMPT_RT */
 # else /* KFIO_PARTITION_STATS */
 #  if KFIOC_HAS_DISK_STATS_READ_WRITE_ARRAYS
         disk_stat_inc(gd, ios[0]);
         disk_stat_add(gd, sectors[0], totalsize >> 9);
+# if KFIOC_HAS_DISK_STATS_NSECS
         disk_stat_add(gd, nsecs[0], jiffies_to_nsecs(fusion_usectohz(duration)));
+# else
+        disk_stat_add(gd, ticks[0], fusion_usectohz(duration));
+# endif
 #  else /* KFIO_C_HAS_DISK_STATS_READ_WRITE_ARRAYS */
         disk_stat_inc(gd, reads);
         disk_stat_add(gd, read_sectors, totalsize >> 9);
@@ -2229,10 +2245,8 @@ static void kfio_elevator_change(struct request_queue *q, char *name)
 {
 // We don't use the real elevator_change since it isn't in the RedHat Whitelist
 // see FH-14626 for the gory details.
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,18,0)
-    errprint("API elevator_init/exit missing (commit a8a275c9c2fb).");
-    q->elevator = NULL;
-#elif !defined(__VMKLNX__)
+#if !defined(__VMKLNX__)
+#if KFIOC_HAS_ELEVATOR_INIT
 #if KFIOC_ELEVATOR_EXIT_HAS_REQQ_PARAM
     elevator_exit(q, q->elevator);
 # else
@@ -2241,12 +2255,14 @@ static void kfio_elevator_change(struct request_queue *q, char *name)
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
     q->elevator = NULL;
 # endif
-#  else
     if (elevator_init(q, name))
     {
         errprint("Failed to initialize noop io scheduler\n");
     }
 #endif
+# else
+    errprint("elevator_init() unavailable. Setting elevator to noop skipped.\n");
+# endif
 }
 
 #if KFIOC_HAS_BIO_COMP_CPU
